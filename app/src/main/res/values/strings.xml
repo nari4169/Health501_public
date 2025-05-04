@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Step Counter</string>
+    <string name="menu">Menu</string>
+    <string name="health_connect_logo">Health Connect</string>
+    <string name="welcome_message">WelCome Health Connect</string>
+    <string name="not_supported_message">Health Connwct Not Supported</string>
+    <string name="not_installed_message">Health Connect Not Installed</string>
+    <string name="installed_message">Health Installed</string>
+    <string-array name="sleep_notes_array">
+        <item>I slept great!</item>
+        <item>I got woken up</item>
+        <item>Struggled to sleep</item>
+        <item>Much needed sleep</item>
+        <item>Restful sleep</item>
+    </string-array>
+</resources>
