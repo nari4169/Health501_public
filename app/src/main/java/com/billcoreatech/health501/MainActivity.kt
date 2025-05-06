@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.billcoreatech.health501.helper.PermissionHelper
 import com.billcoreatech.health501.presentaion.HealthConnectApp
 import com.billcoreatech.health501.ui.theme.Health501Theme
 import com.billcoreatech.health501.viewmodels.HealthConnectViewModel
@@ -18,6 +19,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     val viewModel: HealthConnectViewModel by viewModels()
+    val permissionHelper by lazy { PermissionHelper(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,7 +28,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             Health501Theme {
                 Surface ( modifier = Modifier.padding(20.dp)) {
-                    HealthConnectApp()
+                    HealthConnectApp(permissionHelper)
                 }
             }
         }

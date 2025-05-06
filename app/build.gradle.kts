@@ -87,4 +87,6 @@ dependencies {
     implementation (libs.diaglog.core)
     implementation (libs.diaglog.lifecycle)
 
+    // fitness
+    implementation(libs.services.fitness)
 }

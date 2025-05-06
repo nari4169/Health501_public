@@ -1,10 +1,9 @@
 package com.billcoreatech.health501.viewmodels
 
+import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Application
 import android.os.RemoteException
 import android.util.Log
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,18 +19,22 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.billcoreatech.health501.data.BucketData
+import com.billcoreatech.health501.data.DataPointData
+import com.billcoreatech.health501.data.DataSetData
 import com.billcoreatech.health501.data.ExerciseSession
 import com.billcoreatech.health501.data.ExerciseSessionData
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import com.billcoreatech.health501.data.HealthConnectManager
-import com.billcoreatech.health501.di.StepCounterApplication
+import com.billcoreatech.health501.helper.PermissionHelper
 import com.example.healthconnectsample.data.dateTimeWithOffsetOrDefault
-import dagger.hilt.android.internal.Contexts.getApplication
+import com.google.android.gms.fitness.data.LocalDataType
+import com.google.android.gms.fitness.data.LocalDataType.TYPE_STEP_COUNT_DELTA
+import com.google.android.gms.fitness.data.LocalField
+import com.google.android.gms.fitness.request.LocalDataReadRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -41,16 +44,21 @@ import java.time.Instant
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import kotlin.collections.forEach
 import kotlin.random.Random
 import kotlin.reflect.KClass
-import kotlin.text.get
 
 @HiltViewModel
 class HealthConnectViewModel @Inject constructor(
     val healthConnectManager: HealthConnectManager
 ) : ViewModel() {
+
+    var TAG = ""
     // ViewModel 로직 작성
     private val healthConnectCompatibleApps = healthConnectManager.healthConnectCompatibleApps
+    val localRecordingClient = healthConnectManager.localRecordingClient
+
     @SuppressLint("StaticFieldLeak")
 
     val permissions = setOf(
@@ -61,8 +69,12 @@ class HealthConnectViewModel @Inject constructor(
         HealthPermission.getWritePermission(SpeedRecord::class),
         HealthPermission.getWritePermission(DistanceRecord::class),
         HealthPermission.getWritePermission(TotalCaloriesBurnedRecord::class),
-        HealthPermission.getWritePermission(HeartRateRecord::class)
+        HealthPermission.getWritePermission(HeartRateRecord::class),
     )
+
+    val permissionStep = Manifest.permission.ACTIVITY_RECOGNITION
+    var hasPermission = mutableStateOf(false)
+        private set
 
     var uid = mutableStateOf("")
         private set
@@ -82,12 +94,22 @@ class HealthConnectViewModel @Inject constructor(
     val _backgroundReadGranted = MutableStateFlow(false)
     val backgroundReadGranted: StateFlow<Boolean> = _backgroundReadGranted
 
+    val _stepsTotal = MutableStateFlow(0L)
+    val stepsTotal: StateFlow<Long> = _stepsTotal
+    val _startTime = MutableStateFlow(0L)
+    val startTime: StateFlow<Long> = _startTime
+    val _endTime = MutableStateFlow(0L)
+    val endTime: StateFlow<Long> = _endTime
+
     val _sessionsList: MutableStateFlow<List<ExerciseSession>> = MutableStateFlow(listOf())
     val sessionsList: StateFlow<List<ExerciseSession>> = _sessionsList
     val _sessionMetrics: MutableStateFlow<ExerciseSessionData> = MutableStateFlow(ExerciseSessionData(uid.value))
     val sessionMetrics: StateFlow<ExerciseSessionData> = _sessionMetrics
     val _recordList = MutableStateFlow<List<Record>>(listOf())
     val recordList: StateFlow<List<Record>> = _recordList
+
+    val _bucketDataList : MutableStateFlow<List<BucketData>> = MutableStateFlow(listOf())
+    val bucketDataList: StateFlow<List<BucketData>> = _bucketDataList
 
     var uiState: UiState by mutableStateOf(UiState.Uninitialized)
         private set
@@ -106,6 +128,19 @@ class HealthConnectViewModel @Inject constructor(
         }
     }
 
+    fun startStepTracking() {
+        viewModelScope.launch {
+            tryWithPermissionsCheck {
+                try {
+                    _stepsTotal.value = healthConnectManager.readSteps()
+                    Log.e("", "Steps: ${_stepsTotal.value}")
+                } catch (e: Exception) {
+                    Log.e("", "Error starting step tracking: ${e.message}")
+                }
+            }
+        }
+    }
+
     fun readAssociatedSessionData(uid : String) {
         viewModelScope.launch {
             tryWithPermissionsCheck {
@@ -118,14 +153,15 @@ class HealthConnectViewModel @Inject constructor(
         }
     }
 
-    fun readRecordList() {
+    fun readRecordList(uid: String, srtString: String) {
+        seriesRecordsTypeString.value = srtString
         viewModelScope.launch {
             tryWithPermissionsCheck {
                 _recordList.value = listOf()
                 try {
                     _recordList.value = healthConnectManager.fetchSeriesRecordsFromUid(
                         recordType,
-                        uid.value,
+                        uid,
                         seriesRecordsType
                     )
                 } catch (e: Exception) {
@@ -187,6 +223,129 @@ class HealthConnectViewModel @Inject constructor(
                     sourceAppInfo = healthConnectCompatibleApps[packageName],
                     title = record.title
                 )
+            }
+    }
+
+    /**
+     * Subscribes to the [LocalDataType.TYPE_STEP_COUNT_DELTA].
+     */
+    @SuppressLint("MissingPermission")
+    fun subscribeData(){
+        if (!hasPermission.value) {
+            Log.e(TAG, "Permission ACTIVITY_RECOGNITION is not granted!")
+            return
+        }
+
+        localRecordingClient
+            .subscribe(LocalDataType.TYPE_STEP_COUNT_DELTA)
+            .addOnSuccessListener {
+                Log.e(TAG, "Successfully subscribed!")
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "There was a problem of subscribing.", e)
+            }
+
+    }
+
+    /**
+     * Reads raw data of [LocalDataType.TYPE_STEP_COUNT_DELTA] between the given start and end time.
+     */
+    fun readRawData(
+        startTime: ZonedDateTime,
+        endTime: ZonedDateTime
+    ){
+        val readRequest = LocalDataReadRequest.Builder()
+            .read(TYPE_STEP_COUNT_DELTA)
+            .bucketByTime(1, TimeUnit.HOURS)
+            .setTimeRange(
+                startTime.toEpochSecond(),
+                endTime.toEpochSecond(),
+                TimeUnit.SECONDS
+            )
+            .build()
+
+        _stepsTotal.value = 0L
+        localRecordingClient.readData(readRequest)
+            .addOnSuccessListener { response ->
+                _bucketDataList.value = listOf()
+                _bucketDataList.value = response.buckets.mapIndexed({ bucketIndex, bucket ->
+                    BucketData(
+                        index = bucketIndex,
+                        startTime = bucket.getStartTime(TimeUnit.SECONDS),
+                        endTime = bucket.getEndTime(TimeUnit.SECONDS),
+                        dataSetDataList = bucket.dataSets.mapIndexed({ dataSetIndex, dataSet ->
+                            DataSetData(
+                                index = dataSetIndex,
+                                dataPointDataList = dataSet.dataPoints.mapIndexed({ dataPointIndex, dataPoint ->
+                                    _startTime.value = dataPoint.getStartTime(TimeUnit.SECONDS)
+                                    _endTime.value = dataPoint.getEndTime(TimeUnit.SECONDS)
+                                    _stepsTotal.value += dataPoint.getValue(LocalField.FIELD_STEPS)
+                                        .asInt()
+                                    DataPointData(
+                                        index = dataPointIndex,
+                                        startTime = dataPoint.getStartTime(TimeUnit.SECONDS),
+                                        endTime = dataPoint.getEndTime(TimeUnit.SECONDS),
+                                        fieldName = LocalField.FIELD_STEPS.name,
+                                        fieldValue = dataPoint.getValue(LocalField.FIELD_STEPS)
+                                            .asInt()
+                                    )
+                                })
+                            )
+                        })
+                    )
+                })
+                Log.e(TAG, "Successfully read raw data")
+            }.addOnFailureListener { e ->
+                Log.e(TAG, "Error reading data between $startTime and $endTime", e)
+            }
+    }
+
+    /**
+     * Reads aggregate data of [LocalDataType.TYPE_STEP_COUNT_DELTA] between the given start and end time.
+     */
+    fun readAggregateData(
+        startTime: ZonedDateTime,
+        endTime: ZonedDateTime
+    ){
+        val readRequest = LocalDataReadRequest.Builder()
+            .aggregate(TYPE_STEP_COUNT_DELTA)
+            .bucketByTime(1, TimeUnit.HOURS)
+            .setTimeRange(
+                startTime.toEpochSecond(),
+                endTime.toEpochSecond(),
+                TimeUnit.SECONDS
+            )
+            .build()
+
+        localRecordingClient.readData(readRequest)
+            .addOnSuccessListener { response ->
+                _bucketDataList.value = listOf()
+                _bucketDataList.value = response.buckets.mapIndexed({ bucketIndex, bucket ->
+                    BucketData(
+                        index = bucketIndex,
+                        startTime = bucket.getStartTime(TimeUnit.SECONDS),
+                        endTime = bucket.getEndTime(TimeUnit.SECONDS),
+                        dataSetDataList = bucket.dataSets.mapIndexed({ dataSetIndex, dataSet ->
+                            DataSetData(
+                                index = dataSetIndex,
+                                dataPointDataList = dataSet.dataPoints.mapIndexed({ dataPointIndex, dataPoint ->
+                                    DataPointData(
+                                        index = dataPointIndex,
+                                        startTime = dataPoint.getStartTime(TimeUnit.SECONDS),
+                                        endTime = dataPoint.getEndTime(TimeUnit.SECONDS),
+                                        fieldName = LocalField.FIELD_STEPS.name,
+                                        fieldValue = dataPoint.getValue(LocalField.FIELD_STEPS)
+                                            .asInt()
+                                    )
+                                })
+                            )
+                        })
+                    )
+                })
+
+                Log.i(TAG, "Successfully read aggregate data")
+            }.addOnFailureListener { e ->
+                Log.w(TAG, "Error reading data between $startTime and $endTime", e)
             }
     }
 

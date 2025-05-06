@@ -20,6 +20,7 @@
     <uses-permission android:name="android.permission.health.READ_WEIGHT"/>
     <uses-permission android:name="android.permission.health.WRITE_WEIGHT"/>
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
     <!-- Health Connect가 설치되어 있지 않을 경우 플레이스토어 리디렉션 지원 -->
     <queries>

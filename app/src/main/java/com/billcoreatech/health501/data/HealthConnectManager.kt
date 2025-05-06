@@ -51,6 +51,7 @@ import com.billcoreatech.health501.R
 import javax.inject.Inject
 import com.example.healthconnectsample.data.SleepSessionData
 import com.example.healthconnectsample.data.randomSleepStage
+import com.google.android.gms.fitness.FitnessLocal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.io.IOException
@@ -70,6 +71,8 @@ class HealthConnectManager @Inject constructor (private val context: Context) {
         Log.e("", "healthConnectClient: ")
         HealthConnectClient.getOrCreate(context)
     }
+
+    val localRecordingClient by lazy { FitnessLocal.getLocalRecordingClient(context) }
 
     val healthConnectCompatibleApps by lazy {
         Log.e("", "healthConnectCompatibleApps: ")
@@ -445,6 +448,24 @@ class HealthConnectManager @Inject constructor (private val context: Context) {
             stageStart = checkedEnd
         }
         return sleepStages
+    }
+
+    suspend fun readSteps(): Long {
+        // 현재 시작 시간과 종료 시간을 설정합니다.
+        val now = Instant.now()
+        val startOfDay = now.truncatedTo(ChronoUnit.DAYS)
+
+        val response = healthConnectClient.readRecords(
+            ReadRecordsRequest(
+                StepsRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
+            )
+        )
+        var totalSteps = 0L
+        for (record in response.records) {
+            totalSteps += record.count
+        }
+        return totalSteps
     }
 
     /**
